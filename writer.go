@@ -256,6 +256,8 @@ func (w *Writer) Reopen(file string) error {
 		}
 	}
 
+	w.file.Close()
+
 	if err := os.Rename(w.absPath, file); err != nil {
 		return err
 	}
@@ -264,8 +266,12 @@ func (w *Writer) Reopen(file string) error {
 		return err
 	}
 
-	// swap the unsafe pointer
-	oldfile := atomic.SwapPointer((*unsafe.Pointer)(unsafe.Pointer(&w.file)), unsafe.Pointer(newfile))
+	w.file = newfile
+
+	oldfile, err := os.OpenFile(file, DefaultFileFlag, DefaultFileMode)
+	if err != nil {
+		return err
+	}
 
 	go func() {
 		defer (*os.File)(oldfile).Close()
@@ -295,9 +301,10 @@ func (w *Writer) Reopen(file string) error {
 
 func (w *Writer) Write(b []byte) (int, error) {
 	var ok = false
-	for ! ok {
+	for !ok {
 		select {
 		case filename := <-w.fire:
+			w.file.Close()
 			if err := w.Reopen(filename); err != nil {
 				return 0, err
 			}
@@ -315,7 +322,7 @@ func (w *LockedWriter) Write(b []byte) (n int, err error) {
 	w.Lock()
 
 	var ok = false
-	for ! ok {
+	for !ok {
 		select {
 		case filename := <-w.fire:
 			if err := w.Reopen(filename); err != nil {
@@ -337,7 +344,7 @@ func (w *LockedWriter) Write(b []byte) (n int, err error) {
 func (w *AsynchronousWriter) Write(b []byte) (int, error) {
 	if atomic.LoadInt32(&w.closed) == 0 {
 		var ok = false
-		for ! ok {
+		for !ok {
 			select {
 			case filename := <-w.fire:
 				if err := w.Reopen(filename); err != nil {
@@ -378,7 +385,7 @@ func (w *AsynchronousWriter) writer() {
 
 func (w *BufferWriter) Write(b []byte) (int, error) {
 	var ok = false
-	for ! ok {
+	for !ok {
 		select {
 		case filename := <-w.fire:
 			if err := w.Reopen(filename); err != nil {
